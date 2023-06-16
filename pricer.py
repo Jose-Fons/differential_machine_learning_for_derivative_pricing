@@ -25,14 +25,14 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 torch.set_default_dtype(torch.float64)
 
 class LitAutoEncoder(pl.LightningModule):
-    def __init__(self, config, n_inputs=1, n_outputs=1, normalize=True):
+    def __init__(self, config, grad_pen, n_inputs=1, n_outputs=1, normalize=True):
         super(LitAutoEncoder, self).__init__()
         #Hyperparameters
         self.hidden_layers = config['hidden_layers']
         self.lr = config['learning_rate']
         self.batch_size = config['batch_size']
         self.alpha = config['alpha'] #ELU hyperparameter
-        # self.deriv_pen = config['deriv_pen'] #Loss function multiplier for differential
+        self.grad_pen = grad_pen #Loss function multiplier for gradients
         
         #Values for normalization
         self.epsilon = 1.0e-08 #to avoid singularities
@@ -90,7 +90,7 @@ class LitAutoEncoder(pl.LightningModule):
             z_pred = z_pred * stats['x']['std'] / stats['y']['std']
         
         #Loss
-        loss = nn.MSELoss()(y_pred, y) + 10 * torch.mean(torch.pow((z_pred - z) / stats['z']['norm'], 2), 0).sum()
+        loss = nn.MSELoss()(y_pred, y) + self.grad_pen * torch.mean(torch.pow((z_pred - z) / stats['z']['norm'], 2), 0).sum()
         return loss
     
     
@@ -151,21 +151,23 @@ class DataModule(pl.LightningDataModule):
 # Hyperparameter tuning
 epochs = 25
 normalize = True
+grad_pen = 10
 
 config = {
-    'hidden_layers': tune.choice([layer for r in [2,3,4] for layer in product([16, 32, 64, 128, 256], repeat=r)]),
+    'hidden_layers': tune.choice([layer for r in [2,3] for layer in product([16, 32, 64, 128, 256], repeat=r)]),
     # 'hidden_layers': tune.choice([layer for r in [1,3,5] for layer in product([32, 64, 128], repeat=r)]),
     # 'hidden_layers': tune.choice([tuple([nodes] * layers) for nodes in [16, 32, 64, 128, 256] for layers in range(1,6)]),
+    # 'hidden_layers': tune.choice([(256, 128, 64), (128, 64, 32), (64, 32, 16)]),
     'learning_rate': tune.loguniform(1e-4, 1e-1),
     'batch_size': tune.choice([32, 64, 128]),
     'alpha': tune.uniform(0, 10),
-    # 'deriv_pen': tune.uniform(0, 10),
 }
 
 def train_tune(config, epochs=25):
-    dataset = torch.load('C:/Users/josef/OneDrive - Universitat de Valencia/TFM/Pricer/simulation_data.pt')
+    #Tune changes someway the working directory, so this part needs a complete archive access path
+    dataset = torch.load('C:/Users/josef/OneDrive - Universitat de Valencia/TFM/Pricer/Data/regulation_simulation_data.pt')
     data = DataModule(dataset, config)
-    model = LitAutoEncoder(config, n_inputs=dataset[:][0].size()[1], n_outputs=1, normalize=normalize)
+    model = LitAutoEncoder(config, grad_pen, n_inputs=dataset[:][0].size()[1], n_outputs=1, normalize=normalize)
     trainer = pl.Trainer(max_epochs=epochs, callbacks=[EarlyStopping(monitor="val_loss", mode="min", patience=5)])
     trainer.fit(model, data)
 
@@ -182,27 +184,29 @@ result = tune.run(train_tune, config=config, progress_reporter=reporter,
 # Train with best hyperparameters
 epochs = 25
 normalize = True
-config = {'hidden_layers': (256, 64, 64), 'learning_rate': 0.003242405561782988, 'batch_size': 64, 'alpha': 0.7843895203261764}
-loss=0.00031712265922966427
+grad_pen = 10
+config = {'hidden_layers': (128, 256, 64, 16), 'learning_rate': 0.0020434855190057453, 'batch_size': 64, 'alpha': 1.147389576148048}
+# loss=8.61778564435248e-05
 
-dataset = torch.load('./regulation_simulation_data.pt')
+dataset = torch.load('./Data/regulation_simulation_data.pt')
 data = DataModule(dataset, config)
-model = LitAutoEncoder(config, n_inputs=dataset[:][0].size()[1], n_outputs=1, normalize=normalize)
+model = LitAutoEncoder(config, grad_pen, n_inputs=dataset[:][0].size()[1], n_outputs=1, normalize=normalize)
 trainer = pl.Trainer(max_epochs=epochs, callbacks=[EarlyStopping(monitor="val_loss", mode="min", patience=5)])
 trainer.fit(model, data)
 
 
 #%%
 #Payoff and gradient prediction
-dataset = torch.load('./regulation_real_data.pt')
+dataset = torch.load('./Data/regulation_real_data.pt')
 y_pred, z_pred = model(dataset[:][0])
 n_assets = int(dataset[:][0].size()[1] / 2)
+loss = nn.MSELoss()(y_pred, dataset[:][1]) + grad_pen * torch.mean(torch.pow((z_pred - dataset[:][2]), 2), 0).sum()
 
 #Save results
 dataset_pred = torch.utils.data.TensorDataset(dataset[:][0], y_pred, z_pred)
-torch.save(dataset_pred, './predicted_data.pt')
+torch.save(dataset_pred, './Data/predicted_data.pt')
 
-#Show results
+#Graphs function
 def plot_results(x, y, y_pred, title, xlab, ylab):
     x = x.detach().numpy()
     y = y.detach().numpy()
@@ -215,28 +219,37 @@ def plot_results(x, y, y_pred, title, xlab, ylab):
     plt.title(title)
     plt.legend()
 
-plt.figure(figsize=(20, 5*n_assets))
+#Round configuration values
+config['learning_rate'] = round(config['learning_rate'], 5)
+config['alpha'] = round(config['alpha'], 3)
+
+#Show results
+plt.figure(figsize=(18, 5*n_assets))
 for i in range(n_assets):
     plt.subplot(n_assets, 3, 3*(i+1)-2)
-    plot_results(dataset[:][0][:, i], dataset[:][1], y_pred, 'Price', 'S'+str(i+1), '$C_g$')
+    plot_results(dataset[:][0][:, i], dataset[:][1], y_pred, 'Price', 'S'+str(i+1), '$V_0$')
     plt.subplot(n_assets, 3, 3*(i+1)-1)
     plot_results(dataset[:][0][:, i], dataset[:][2][:, i], z_pred[:, i], 'Delta', 'S'+str(i+1), '$\Delta$'+str(i+1))
     plt.subplot(n_assets, 3, 3*(i+1))
     plot_results(dataset[:][0][:, i], dataset[:][2][:, n_assets+i], z_pred[:, n_assets+i], 'Vega', 'S'+str(i+1), '$\\nu$'+str(i+1))
 
-_ = plt.suptitle("Neural Network Predictions")
+_ = plt.suptitle("Geometric basket call predictions\n(regulation dataset based on differences)")
 
-_ = plt.figtext(0.001, 0.86, "Data normalization:")
-_ = plt.figtext(0.005, 0.83, str(normalize), color="blue")
-_ = plt.figtext(0.001, 0.76, "Validation loss:")
-_ = plt.figtext(0.005, 0.73, str(loss), color="blue")
+#Print hyperparameter values
+_ = plt.figtext(0, 0.86, "Data normalization:")
+_ = plt.figtext(0, 0.83, str(normalize), color="blue")
+_ = plt.figtext(0, 0.76, "Prediction loss:")
+_ = plt.figtext(0, 0.73, str(round(loss.item(), 7)), color="blue")
 for i, (key, value) in enumerate(config.items()):
-    _ = plt.figtext(0.001, 0.76-0.1*(i+1), key + ":")
-    _ = plt.figtext(0.005, 0.73-0.1*(i+1), str(value), color="blue")
+    _ = plt.figtext(0, 0.76-0.1*(i+1), key + ":")
+    _ = plt.figtext(0, 0.73-0.1*(i+1), str(value), color="blue")
+_ = plt.figtext(0, 0.76-0.1*(len(config.items())+1), "$\lambda$ (Gradient penalty):")
+_ = plt.figtext(0, 0.73-0.1*(len(config.items())+1), str(grad_pen), color="blue")
 plt.show()
 
 
 #%%
+#Best hyperparameters combinations
 
 # config = {'hidden_layers': (64, 256, 32), 'learning_rate': 0.0009976629846684705, 'batch_size': 64, 'alpha': 0.11631924590986942}
 # loss=1.2394721125019714e-05
@@ -246,3 +259,31 @@ plt.show()
 
 # config = {'hidden_layers': (256, 64, 64), 'learning_rate': 0.003242405561782988, 'batch_size': 64, 'alpha': 0.7843895203261764}
 # loss=0.00031712265922966427
+
+# config = {'hidden_layers': (16, 16, 64), 'learning_rate': 0.0012477005179843312, 'batch_size': 128, 'alpha': 1.887009372781434}
+# loss=inf
+
+# config = {'hidden_layers': (256, 128, 64, 32), 'learning_rate': 0.026235662270740853, 'batch_size': 64, 'alpha': 1.8200700322792285}
+# loss=inf
+
+# config = {'hidden_layers': (256, 128, 64), 'learning_rate': 0.0002614783398977329, 'batch_size': 32, 'alpha': 1.159029241344316}
+# loss=inf
+
+# config = {'hidden_layers': (64, 32, 16), 'learning_rate': 0.023759031518218034, 'batch_size': 128, 'alpha': 1.6815846327195438}
+# loss=inf
+
+# config = {'hidden_layers': (128,), 'learning_rate': 0.0015240462867047596, 'batch_size': 32, 'alpha': 2.3313638464100297}
+# loss=inf
+
+#Maybe
+
+# config = {'hidden_layers': (64, 64, 64), 'learning_rate': 0.0003148446761691601, 'batch_size': 32, 'alpha': 3.5389208650363404}
+# loss=inf
+
+# config = {'hidden_layers': (64, 64, 256, 16), 'learning_rate': 0.0004008219815778804, 'batch_size': 32, 'alpha': 6.802560840943547}
+# loss=inf
+
+#Never
+
+# {'hidden_layers': (128, 64), 'learning_rate': 0.02859818095592624, 'batch_size': 128, 'alpha': 8.739220496981906}
+# loss=inf

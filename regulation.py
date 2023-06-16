@@ -13,7 +13,7 @@ from torchmetrics import SpearmanCorrCoef
 
 #%%
 #Basilea tests function
-def basilea_test(HPL, RTPL, title, cumulative=True):
+def basilea_test(HPL, RTPL, title, ax, n_axis, cumulative=True,):
     #Spearman Correlation Coefficient
     spear_test = SpearmanCorrCoef()(HPL[:, 0], RTPL[:, 0]).item()
     
@@ -41,27 +41,25 @@ def basilea_test(HPL, RTPL, title, cumulative=True):
         ks_color = 'green'
     
     #Histogram
-    fig = plt.figure()
-    ax = fig.add_subplot()
-    ax.hist(HPL[:, 0], bins=50, color='blue', cumulative=cumulative, label='Groun Truth')
-    ax.hist(RTPL[:, 0].detach().numpy(), bins=50, color='red', cumulative=cumulative, label='Prediction', alpha=0.5)
+    ax[n_axis].hist(HPL[:, 0], bins=50, color='blue', cumulative=cumulative, density=True, label='Groun Truth')
+    ax[n_axis].hist(RTPL[:, 0].detach().numpy(), bins=50, color='red', cumulative=cumulative, density=True, label='Prediction', alpha=0.5)
+    ax[n_axis].set_xlim(min(min(HPL), min(RTPL)).item(), max(max(HPL), max(RTPL)).item())
     if cumulative:
-        ax.set_ylabel('Cumulated Counts')
+        ax[n_axis].set_ylabel('Cumulated Counts')
     else:
-        ax.set_ylabel('Counts')
-    ax.set_title('Profit & Loss \n (base scenario for predicted P&L: ' + title + ')')
-    ax.legend(loc='lower left')
+        ax[n_axis].set_ylabel('Counts')
+    ax[n_axis].set_title('(base scenario for predicted P&L: ' + title + ')')
+    ax[n_axis].legend(loc='center left')
     
-    ax.text(0, 0.99, 'Spearman: ' + str(round(spear_test, 5)), color=spear_color, verticalalignment='top', horizontalalignment='left', transform=ax.transAxes)
-    ax.text(0, 0.95, 'K-S: ' + str(round(ks_test, 5)), color=ks_color, verticalalignment='top', horizontalalignment='left', transform=ax.transAxes)
+    ax[n_axis].text(0, 0.99, 'Spearman: ' + str(round(spear_test, 5)), color=spear_color, verticalalignment='top', horizontalalignment='left', transform=ax[n_axis].transAxes)
+    ax[n_axis].text(0, 0.95, 'K-S: ' + str(round(ks_test, 5)), color=ks_color, verticalalignment='top', horizontalalignment='left', transform=ax[n_axis].transAxes)
     
-    plt.show()
 
 #%%
 #Loading data
 torch.set_default_dtype(torch.float64)
-real = torch.load('./regulation_real_data.pt')
-pred = torch.load('./predicted_data.pt')
+real = torch.load('./Data/regulation_real_data.pt')
+pred = torch.load('./Data/predicted_data.pt')
 
 #Profit & Loss
 real_PL = real[1:][1] - real[0][1]
@@ -70,5 +68,11 @@ pred_PL2 = pred[1:][1] - pred[0][1]
 
 #%%
 #Results
-basilea_test(real_PL, pred_PL1, 'Ground Truth', cumulative=True)
-basilea_test(real_PL, pred_PL2, 'Prediction', cumulative=True)
+fig, ax = plt.subplots(1, 2, figsize=(12, 5))
+plt.subplots_adjust(left=0.1, bottom=0.1, right=0.9, top=0.9, wspace=0.15, hspace=0.4)
+
+basilea_test(real_PL, pred_PL1, 'Ground Truth', ax, 0, cumulative=True)
+basilea_test(real_PL, pred_PL2, 'Prediction', ax, 1, cumulative=True)
+
+plt.suptitle('Profit & Loss')
+plt.show()

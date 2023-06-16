@@ -23,14 +23,14 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 torch.set_default_dtype(torch.float64)
 
 class LitAutoEncoder(pl.LightningModule):
-    def __init__(self, config, deriv_pen, n_inputs=1, n_outputs=1, normalize=True):
+    def __init__(self, config, grad_pen, n_inputs=1, n_outputs=1, normalize=True):
         super(LitAutoEncoder, self).__init__()
         #Hyperparameters
         self.hidden_layers = config['hidden_layers']
         self.lr = config['learning_rate']
         self.batch_size = config['batch_size']
         self.alpha = config['alpha'] #ELU hyperparameter
-        self.deriv_pen = deriv_pen #Loss function multiplier for differential
+        self.grad_pen = grad_pen #Loss function multiplier for differential
         
         #Values for normalization
         self.epsilon = 1.0e-08 #to avoid singularities
@@ -88,7 +88,7 @@ class LitAutoEncoder(pl.LightningModule):
             z_pred = z_pred * stats['x']['std'] / stats['y']['std']
         
         #Loss
-        loss = nn.MSELoss()(y_pred, y) + self.deriv_pen * torch.mean(torch.pow((z_pred - z) / stats['z']['norm'], 2), 0).sum()
+        loss = nn.MSELoss()(y_pred, y) + self.grad_pen * torch.mean(torch.pow((z_pred - z) / stats['z']['norm'], 2), 0).sum()
         return loss
     
     
@@ -162,23 +162,34 @@ def ks_test(HPL, RTPL):
 #Hyperparameter configurations
 epochs = 25
 normalize = True
-config = []
-for i, layers in enumerate([1, 3, 4, 5]):
-    for j, nodes in enumerate([32, 64, 128]):
-        config.append({'hidden_layers': tuple([nodes] * layers), 
-                       'learning_rate': 0.0015, 'batch_size': 64, 'alpha': 0.7})
-deriv_pen = [0, 0.1, 0.5, 1, 5, 10]
+# config = []
+# for i, layers in enumerate([1, 3, 4, 5]):
+#     for j, nodes in enumerate([32, 64, 128]):
+#         config.append({'hidden_layers': tuple([nodes] * layers), 
+#                        'learning_rate': 0.0015, 'batch_size': 64, 'alpha': 0.7})
+config = [{'hidden_layers': (64, 256, 32), 'learning_rate': 0.0009976629846684705, 'batch_size': 64, 'alpha': 0.11631924590986942},
+          {'hidden_layers': (128, 256, 64, 16), 'learning_rate': 0.0020434855190057453, 'batch_size': 64, 'alpha': 1.147389576148048},
+          {'hidden_layers': (256, 64, 64), 'learning_rate': 0.003242405561782988, 'batch_size': 64, 'alpha': 0.7843895203261764},
+          {'hidden_layers': (16, 16, 64), 'learning_rate': 0.0012477005179843312, 'batch_size': 128, 'alpha': 1.887009372781434},
+          {'hidden_layers': (256, 128, 64, 32), 'learning_rate': 0.026235662270740853, 'batch_size': 64, 'alpha': 1.8200700322792285},
+          {'hidden_layers': (256, 128, 64), 'learning_rate': 0.0002614783398977329, 'batch_size': 32, 'alpha': 1.159029241344316},
+          {'hidden_layers': (64, 32, 16), 'learning_rate': 0.023759031518218034, 'batch_size': 128, 'alpha': 1.6815846327195438},
+          {'hidden_layers': (128,), 'learning_rate': 0.0015240462867047596, 'batch_size': 32, 'alpha': 2.3313638464100297},
+          {'hidden_layers': (64, 64, 64), 'learning_rate': 0.0003148446761691601, 'batch_size': 32, 'alpha': 3.5389208650363404},
+          {'hidden_layers': (64, 64, 256, 16), 'learning_rate': 0.0004008219815778804, 'batch_size': 32, 'alpha': 6.802560840943547},
+          {'hidden_layers': (128, 64), 'learning_rate': 0.02859818095592624, 'batch_size': 128, 'alpha': 8.739220496981906}]
+grad_pen = [0, 0.1, 0.5, 1, 5, 10]
 
 #Datasets
-dataset_train = torch.load('./regulation_simulation_data.pt')
-dataset_real = torch.load('./regulation_real_data.pt')
+dataset_train = torch.load('./Data/regulation_simulation_data.pt')
+dataset_real = torch.load('./Data/regulation_real_data.pt')
 
 
 #%%
 #K-S computation loop
-ks_results = np.empty((len(deriv_pen), len(config)))
+ks_results = np.empty((len(grad_pen), len(config)))
 for i, hyper in enumerate(config):
-    for j, penalty in enumerate(deriv_pen):
+    for j, penalty in enumerate(grad_pen):
         #Train
         data = DataModule(dataset_train, hyper)
         model = LitAutoEncoder(hyper, penalty, n_inputs=dataset_train[:][0].size()[1], n_outputs=1, normalize=normalize)
@@ -208,14 +219,14 @@ plt.figure(figsize=(14,5))
 plt.subplots_adjust(left=0.1, bottom=0.1, right=0.9, top=0.9, wspace=0, hspace=0.4)
 
 plt.subplot(1,2,1)
-plt.plot(deriv_pen, ks_results, label=labels)
+plt.plot(grad_pen, ks_results, label=labels)
 
 #Regulation zones
-plt.axhline(0.09, linestyle='--', color='green')
-plt.axhline(0.12, linestyle='--', color='orange')
+plt.axhline(0.09, linestyle='--', color='orange')
+plt.axhline(0.12, linestyle='--', color='red')
 plt.axhspan(0, 0.09, facecolor='green', alpha=0.1)
 plt.axhspan(0.09, 0.12, facecolor='orange', alpha=0.1)
-plt.axhspan(0.12, 1, facecolor='red', alpha=0.1)
+plt.axhspan(0.12, 0.2, facecolor='red', alpha=0.1)
 
 plt.xlabel('$\lambda$ (gradient penalty)')
 plt.ylabel('KS test value')
