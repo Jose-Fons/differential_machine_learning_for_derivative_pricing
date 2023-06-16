@@ -1,6 +1,6 @@
 # differential_machine_learning_for_derivative_pricing
 
-This repository consists on three main scripts (data_generator.py, pricer.py, regulation.py), which are the principal part of my masters' degree final project.
+This repository consists on three main scripts (data_generator.py, pricer.py, regulation.py), which are the principal part of my master's degree final project.
 The pricer.py script is where the whole neural newtork is defined, adjusted, trained and setted to predict. This script needs data generated in data_generator.py.
 The script regulation.py computes some tests imposed by Basel regulation authorities and shows results.
 
