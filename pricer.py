@@ -177,7 +177,8 @@ reporter = CLIReporter(parameter_columns=['hidden_layers', 'learning_rate',
                         metric_columns=['loss', 'training_iteration'])
 
 result = tune.run(train_tune, config=config, progress_reporter=reporter, 
-                  scheduler=scheduler, num_samples=200, metric='loss', mode='min')
+                  scheduler=scheduler, num_samples=200, metric='loss', mode='min',
+                  raise_on_failed_trial=False)
 
 
 #%%
@@ -188,7 +189,7 @@ grad_pen = 10
 config = {'hidden_layers': (128, 256, 64, 16), 'learning_rate': 0.0020434855190057453, 'batch_size': 64, 'alpha': 1.147389576148048}
 # loss=8.61778564435248e-05
 
-dataset = torch.load('./Data/regulation_simulation_data.pt')
+dataset = torch.load('./Data/geometric_simulation_data.pt')
 data = DataModule(dataset, config)
 model = LitAutoEncoder(config, grad_pen, n_inputs=dataset[:][0].size()[1], n_outputs=1, normalize=normalize)
 trainer = pl.Trainer(max_epochs=epochs, callbacks=[EarlyStopping(monitor="val_loss", mode="min", patience=5)])
@@ -197,7 +198,7 @@ trainer.fit(model, data)
 
 #%%
 #Payoff and gradient prediction
-dataset = torch.load('./Data/regulation_real_data.pt')
+dataset = torch.load('./Data/geometric_real_data.pt')
 y_pred, z_pred = model(dataset[:][0])
 n_assets = int(dataset[:][0].size()[1] / 2)
 loss = nn.MSELoss()(y_pred, dataset[:][1]) + grad_pen * torch.mean(torch.pow((z_pred - dataset[:][2]), 2), 0).sum()
@@ -233,7 +234,7 @@ for i in range(n_assets):
     plt.subplot(n_assets, 3, 3*(i+1))
     plot_results(dataset[:][0][:, i], dataset[:][2][:, n_assets+i], z_pred[:, n_assets+i], 'Vega', 'S'+str(i+1), '$\\nu$'+str(i+1))
 
-_ = plt.suptitle("Geometric basket call predictions\n(regulation dataset based on differences)")
+_ = plt.suptitle("European call predictions")
 
 #Print hyperparameter values
 _ = plt.figtext(0, 0.86, "Data normalization:")

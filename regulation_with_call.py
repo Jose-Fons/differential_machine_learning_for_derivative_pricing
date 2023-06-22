@@ -76,19 +76,19 @@ pred = torch.load('./Data/predicted_data.pt')
 #Call parameters
 K = torch.tensor(1) #strike
 r = torch.tensor(0.01) #interest rate
-T = torch.tensor(10) #time to maturty (days?)
+T = torch.tensor(1) #time to maturty (days?)
 
 #Portfolios
 n_assets = int(real[:][0].size()[1] / 2)
-porftfolio_real = torch.empty((real[:][0].size()[0], n_assets))
-porftfolio_pred = torch.empty((real[:][0].size()[0], n_assets))
+portfolio_real = real[:][1]
+portfolio_pred = pred[:][1]
 for i in range(n_assets):
     call_prices = call_price(real[:][0][:, i], real[:][0][:, i+n_assets], K, r, T)
     call_prices = call_prices.view(real[:][0][:, i].size()[0], -1).detach()
     w_real = - real[0][2][i+n_assets] / call_vega(real[0][0][i], real[0][0][i+n_assets], K, r, T) #portfolio weights
     w_pred = - pred[0][2][i+n_assets] / call_vega(real[0][0][i], real[0][0][i+n_assets], K, r, T)
-    portfolio_real = real[:][1] + w_real * call_prices
-    portfolio_pred = pred[:][1] + w_pred * call_prices
+    portfolio_real += w_real * call_prices
+    portfolio_pred += w_pred * call_prices
 
 #Profit & Loss
 real_PL = portfolio_real[1:] - portfolio_real[0]

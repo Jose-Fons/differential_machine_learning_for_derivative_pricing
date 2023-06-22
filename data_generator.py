@@ -46,7 +46,7 @@ def call_price(s, vol, K, r, T):
 #Option parameters
 K = torch.tensor(1) #strike
 r = torch.tensor(0.01) #interest rate
-T = torch.tensor(10) #time to maturty (days?)
+T = torch.tensor(1) #time to maturty (days?)
 m = 100000 #number of simulations
 
 

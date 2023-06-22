@@ -155,7 +155,7 @@ def ks_test(HPL, RTPL):
         n_observ_HPL[i] = torch.sum(1 * (HPL < PL)).item()
         n_observ_RTPL[i] = torch.sum(1 * (RTPL < PL)).item()
         
-    return max(abs(0.004 * (n_observ_RTPL - n_observ_HPL)))
+    return max(abs(0.002 * (n_observ_RTPL - n_observ_HPL)))
 
 
 #%%
@@ -181,8 +181,27 @@ config = [{'hidden_layers': (64, 256, 32), 'learning_rate': 0.000997662984668470
 grad_pen = [0, 0.1, 0.5, 1, 5, 10]
 
 #Datasets
-dataset_train = torch.load('./Data/regulation_simulation_data.pt')
-dataset_real = torch.load('./Data/regulation_real_data.pt')
+dataset_train = torch.load('./Data/geometric_simulation_data.pt')
+dataset_real = torch.load('./Data/geometric_real_data.pt')
+
+
+#%%
+#Call price function
+def call_price(s, vol, K, r, T):
+    d1 = (torch.log(s/K) + (r + 0.5 * vol * vol) * T) / (vol * torch.sqrt(T))
+    d2 = d1 - vol * torch.sqrt(T)
+    dist = torch.distributions.normal.Normal(0,1)
+    return s * dist.cdf(d1) - K * dist.cdf(d2) * torch.exp(- r * T)
+
+def call_vega(s, vol, K, r, T):
+    d1 = (torch.log(s/K) + (r + 0.5 * vol * vol) * T) / (vol * torch.sqrt(T))
+    dist = torch.distributions.normal.Normal(0,1)
+    return s * dist.cdf(d1) * torch.sqrt(T)
+
+#Call parameters
+K = torch.tensor(1) #strike
+r = torch.tensor(0.01) #interest rate
+T = torch.tensor(1) #time to maturty (days?)
 
 
 #%%
@@ -199,10 +218,26 @@ for i, hyper in enumerate(config):
         #Predict
         y_pred, z_pred = model(dataset_real[:][0])
         dataset_pred = torch.utils.data.TensorDataset(dataset_real[:][0], y_pred, z_pred)
+        
+        #Portfolios
+        n_assets = int(dataset_real[:][0].size()[1] / 2)
+        portfolio_real = dataset_real[:][1]
+        portfolio_pred = dataset_pred[:][1]
+        for i in range(n_assets):
+            call_prices = call_price(dataset_real[:][0][:, i], dataset_real[:][0][:, i+n_assets], K, r, T)
+            call_prices = call_prices.view(dataset_real[:][0][:, i].size()[0], -1).detach()
+            w_real = - dataset_real[0][2][i+n_assets] / call_vega(dataset_real[0][0][i], dataset_real[0][0][i+n_assets], K, r, T) #portfolio weights
+            w_pred = - dataset_pred[0][2][i+n_assets] / call_vega(dataset_real[0][0][i], dataset_real[0][0][i+n_assets], K, r, T)
+            portfolio_real += w_real * call_prices
+            portfolio_pred += w_pred * call_prices
 
         #Profit & Loss
-        real_PL = dataset_real[1:][1] - dataset_real[0][1]
-        pred_PL = dataset_pred[1:][1] - dataset_pred[0][1]
+        real_PL = portfolio_real[1:] - portfolio_real[0]
+        pred_PL = portfolio_pred[1:] - portfolio_pred[0]
+
+        # #Profit & Loss
+        # real_PL = dataset_real[1:][1] - dataset_real[0][1]
+        # pred_PL = dataset_pred[1:][1] - dataset_pred[0][1]
         
         #Save results
         ks_results[j, i] = ks_test(real_PL, pred_PL)
@@ -210,7 +245,9 @@ for i, hyper in enumerate(config):
         
 #%%
 #Show results
-labels = ['Config. ' + str(n+1) for n in range(len(config))]
+element = [True, True, True, True, True, True, True, True, True, True, False]
+
+labels = ['Config. ' + str(n+1) for n in range(len(config[:10]))]
 for i in range(len(config)):
     config[i]['learning_rate'] = round(config[i]['learning_rate'], 5)
     config[i]['alpha'] = round(config[i]['alpha'], 3)
@@ -219,14 +256,14 @@ plt.figure(figsize=(14,5))
 plt.subplots_adjust(left=0.1, bottom=0.1, right=0.9, top=0.9, wspace=0, hspace=0.4)
 
 plt.subplot(1,2,1)
-plt.plot(grad_pen, ks_results, label=labels)
+plt.plot(grad_pen, ks_results[:, element], label=labels)
 
 #Regulation zones
 plt.axhline(0.09, linestyle='--', color='orange')
 plt.axhline(0.12, linestyle='--', color='red')
 plt.axhspan(0, 0.09, facecolor='green', alpha=0.1)
 plt.axhspan(0.09, 0.12, facecolor='orange', alpha=0.1)
-plt.axhspan(0.12, 0.2, facecolor='red', alpha=0.1)
+plt.axhspan(0.12, 0.7, facecolor='red', alpha=0.1)
 
 plt.xlabel('$\lambda$ (gradient penalty)')
 plt.ylabel('KS test value')
